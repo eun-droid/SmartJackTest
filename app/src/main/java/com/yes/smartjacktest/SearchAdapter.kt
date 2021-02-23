@@ -33,6 +33,14 @@ class SearchAdapter: RecyclerView.Adapter<SearchAdapter.ImageHolder>() {
 
     fun setItems(items: List<ImageItem>) {
         this.items = items.toMutableList()
+        notifyDataSetChanged()
+    }
+
+    fun addItems(items: List<ImageItem>) {
+        val positionStart = this.itemCount
+        this.items.addAll(items.toMutableList())
+        notifyItemRangeInserted(positionStart, items.size)
+
     }
 
     fun clearItems() {
