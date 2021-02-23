@@ -1,4 +1,4 @@
-package com.yes.smartjacktest
+package com.yes.smartjacktest.ui
 
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.yes.smartjacktest.R
 import com.yes.smartjacktest.model.ImageItem
 import kotlinx.android.synthetic.main.item_image.view.*
 

@@ -1,4 +1,4 @@
-package com.yes.smartjacktest
+package com.yes.smartjacktest.ui
 
 import android.app.SearchManager
 import android.content.Context
@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.recyclerview.widget.RecyclerView
+import com.yes.smartjacktest.R
 import com.yes.smartjacktest.api.NaverSearchApi
 import com.yes.smartjacktest.api.provideNaverSearchApi
 import com.yes.smartjacktest.extensions.plusAssign
