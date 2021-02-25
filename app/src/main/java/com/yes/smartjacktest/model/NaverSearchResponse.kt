@@ -8,7 +8,12 @@ data class NaverSearchResponse(
     var start: Int = 1,                 // 검색 결과 문서 중, 문서의 시작점
     var display: Int = 10,               // 검색된 검색 결과의 개수
     var items: List<ImageItem>              // XML 포맷에서는 item 태그, JSON 포맷에서는 items 속성으로 표현됨. 개별 검색 결과임
-)
+) {
+    companion object {
+        const val NAVER_SEARCH_REQ_START_DEFAULT: Int = 1
+        const val NAVER_SEARCH_START_MAX: Int = 1000
+    }
+}
 
 data class ImageItem(
     var title: String = "",         // 검색 결과 이미지의 제목

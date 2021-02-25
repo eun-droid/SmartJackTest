@@ -9,32 +9,90 @@ import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
+import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.RecyclerView
+import com.yes.smartjacktest.BuildConfig
 import com.yes.smartjacktest.R
 import com.yes.smartjacktest.api.NaverSearchApi
 import com.yes.smartjacktest.api.provideNaverSearchApi
 import com.yes.smartjacktest.extensions.plusAssign
-import io.reactivex.Observable
+import com.yes.smartjacktest.model.NaverSearchResponse.Companion.NAVER_SEARCH_REQ_START_DEFAULT
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.disposables.CompositeDisposable
 import kotlinx.android.synthetic.main.activity_main.*
 
 class MainActivity : AppCompatActivity() {
 
-    private val adapter: SearchAdapter by lazy { SearchAdapter() }
-    private val naverSearchApi: NaverSearchApi by lazy { provideNaverSearchApi() }
+    private val searchAdapter: SearchAdapter by lazy { SearchAdapter() }
     private var nextSearchAvailable: Boolean = false
-    private var query: String? = null
+    private var lastKeyword: String? = null
     private val disposables = CompositeDisposable()
+    private val viewModelFactory by lazy {
+        MainViewModel.Factory(
+            provideNaverSearchApi(),
+            application
+        )
+    }
+    lateinit var viewModel: MainViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        viewModel = ViewModelProvider(this, viewModelFactory).get(MainViewModel::class.java)
+
         with(rvSearchedImageList) {
-            adapter = this@MainActivity.adapter
+            adapter = this@MainActivity.searchAdapter
             addOnScrollListener(scrollListener)
         }
+
+        disposables += viewModel.searchResult
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe { optSearchResponse ->
+                with(searchAdapter) {
+                    if (optSearchResponse.isPresent) {
+                        val searchRes = optSearchResponse.get()
+
+                        if (itemCount == 0) {   // 최초 검색
+                            setItems(searchRes.items)
+                        } else {    // 이어서 검색
+                            val startIdx = searchRes.start - 1
+                            val endIdx = startIdx + searchRes.display
+                            addItems(searchRes.items.subList(startIdx, endIdx))
+                        }
+
+                        rvSearchedImageList.scrollToPosition(itemCount-1)
+                    } else {
+                        clearItems()
+                    }
+                }
+            }
+
+        disposables += viewModel.message
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe { optMessage ->
+                if (optMessage.isPresent) {
+                    showMessage(optMessage.get())
+                } else {
+                    hideMessage()
+                }
+            }
+
+        disposables += viewModel.isLoading
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe { isLoading ->
+                if (isLoading) {
+                    showProgress()
+                } else {
+                    hideProgress()
+                }
+            }
+
+        disposables += viewModel.nextSearchAvailable
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe {
+                this.nextSearchAvailable = it
+            }
     }
 
     override fun onStop() {
@@ -51,22 +109,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleIntent(intent: Intent) {
         if (Intent.ACTION_SEARCH == intent.action) {
-            query = intent.getStringExtra(SearchManager.QUERY)
-            searchImage(query, NAVER_SEARCH_REQ_START_DEFAULT)
+            searchImage(intent.getStringExtra(SearchManager.QUERY), NAVER_SEARCH_REQ_START_DEFAULT)
         }
     }
 
     private val scrollListener = object : RecyclerView.OnScrollListener() {
         override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
-            if (nextSearchAvailable) {
-                if (newState == RecyclerView.SCROLL_STATE_IDLE && !recyclerView.canScrollVertically(1)) {    // scroll down
-                    val nextStart = adapter.itemCount + 1
-                    searchImage(query, nextStart)
-                }
-            } else {
-                showToast(getString(R.string.no_more_search_results))
-            }
+            if (newState == RecyclerView.SCROLL_STATE_IDLE && !recyclerView.canScrollVertically(1)) {    // scroll down
+                if (searchAdapter.itemCount == 0)   // 아직 검색하지 않은 경우 예외처리
+                    return
 
+                if (nextSearchAvailable) {
+                    val nextStart = searchAdapter.itemCount + 1
+                    searchImage(lastKeyword, nextStart)
+                } else {
+                    showToast(getString(R.string.no_more_search_results))
+                }
+            }
         }
     }
 
@@ -74,71 +133,11 @@ class MainActivity : AppCompatActivity() {
         if (query == null || query == "")
             return
 
-        disposables += naverSearchApi.searchImage(
-            getString(R.string.naver_api_client_id), getString(R.string.naver_api_client_secret), query, start)
-
-            // Observable 형태로 결과를 바꿔주기 위해 flatMap을 사용
-            .flatMap {
-                if (it.total == 0) {
-                    // 검색 결과가 없을 경우 에러를 발생시켜 에러 메시지를 표시하도록 한다
-                    Observable.error(IllegalStateException(getString(R.string.no_search_result)))
-                } else {
-                    // 검색 결과를 그대로 다음 스트림에 전달
-                    Observable.just(it)
-                }
-            }
-
-            // 이후 수행되는 코드는 메인 스레드에서 실행함
-            .observeOn(AndroidSchedulers.mainThread())
-
-            // 구독할 때 수행할 작업
-            .doOnSubscribe {
-                if (start == NAVER_SEARCH_REQ_START_DEFAULT) {
-                    clearResults()
-                }
-
-                showProgress()
-                hideMessage()
-            }
-
-            // 스트림이 종료될 때 수행할 작업
-            .doOnTerminate { hideProgress() }
-
-            // 옵서버블 구독
-            .subscribe({ searchResponse ->
-                // API를 통해 검색 결과를 정상적으로 수신 시 처리할 작업
-                // 작업 중 오류 발생 시 이 블록 호출되지 않음
-                when (start == NAVER_SEARCH_REQ_START_DEFAULT) {
-                    true -> {   // 최초 검색
-                        nextSearchAvailable = true
-                        with(adapter) {
-                            setItems(searchResponse.items)
-                        }
-                    }
-                    false -> {  // 다음 결과 검색
-                        if (searchResponse.total <= (searchResponse.start + searchResponse.display)
-                            || searchResponse.start >= NAVER_SEARCH_START_MAX) {
-                            nextSearchAvailable = false
-                        }
-
-                        with(adapter) {
-                            addItems(searchResponse.items)
-                            rvSearchedImageList.scrollToPosition(itemCount-1)
-                        }
-                    }
-                }
-            }) {
-                // 에러 블록
-                showMessage(it.message)
-            }
-
-    }
-
-    private fun clearResults() {
-        with(adapter) {
-            clearItems()
-            notifyDataSetChanged()
-        }
+        disposables += viewModel.searchImage(
+            BuildConfig.NAVER_API_CLIENT_ID,
+            BuildConfig.NAVER_API_CLIENT_SECRET,
+            query,
+            start)
     }
 
     private fun showProgress() {
@@ -164,9 +163,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showToast(message: String) {
-        //runOnUiThread {
-            Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
-        //}
+        Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -176,13 +173,17 @@ class MainActivity : AppCompatActivity() {
         val searchManager = getSystemService(Context.SEARCH_SERVICE) as SearchManager
         (menu.findItem(R.id.search).actionView as SearchView).apply {
             setSearchableInfo(searchManager.getSearchableInfo(componentName))
+            setIconifiedByDefault(true)
+
+            disposables += viewModel.lastSearchKeyword
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe { optLastKeyword ->
+                    if (optLastKeyword.isPresent) {
+                        lastKeyword = optLastKeyword.get()
+                    }
+                }
         }
 
         return true
-    }
-
-    companion object {
-        const val NAVER_SEARCH_REQ_START_DEFAULT: Int = 1
-        const val NAVER_SEARCH_START_MAX: Int = 1000
     }
 }
